@@ -44,7 +44,6 @@ local SCRIPT        = 'yj_SoundPicker'
 local SEP           = package.config:sub(1, 1)
 local RESOURCE      = reaper.GetResourcePath()
 local WAVE_POINTS   = 4000  -- peaks per file: one per pixel even on a wide window
-local SILENT        = 0.002 -- peak to peak below this (about -60 dB) is silence
 local MAX_WAVE_LEN  = 900   -- seconds; longer files show no waveform
 local TRASH_FRAMES  = 30    -- frames to wait before freeing a stopped preview's source
 local GLUE_CMD      = 40362 -- Item: Glue items, ignoring time selection
@@ -2302,7 +2301,7 @@ local function wave_runs(x1, y1, x2, y2)
     local mx, mn, cc = ch.max, ch.min, ch.col
     local mid = y1 + (c - 0.5) * lane_h
     local amp = lane_h / 2 - (nl > 1 and 2 or 4)
-    local run = false -- no bar to extend yet, and never across a channel or a gap
+    local run = false -- no bar to extend yet, and never across a channel
     for j = 1, cols do
       local rj = S.reverse and (cols - j) or (j - 1)
       local i0 = math.floor(rj * n / cols) + 1
@@ -2314,20 +2313,15 @@ local function wave_runs(x1, y1, x2, y2)
         if b < lo then lo = b end
       end
       local t, b = mid - hi * amp, mid - lo * amp
-      -- a column with signal is never thinner than a pixel; silence draws nothing
-      if b - t < 1 and hi - lo > SILENT then b = t + 1 end
-      if b <= t then
-        run = false
+      if b - t < 1 then b = t + 1 end -- silence still draws the centre line, as REAPER does
+      local k = (cc and cc[pk] and UI.spec_col(cc[pk])) or T.wave
+      local xb = x1 + j * cw + 0.5
+      if run and rects[m] == k and math.abs(rects[m - 3] - t) < 0.5 and math.abs(rects[m - 1] - b) < 0.5 then
+        rects[m - 2] = xb
       else
-        local k = (cc and cc[pk] and UI.spec_col(cc[pk])) or T.wave
-        local xb = x1 + j * cw + 0.5
-        if run and rects[m] == k and math.abs(rects[m - 3] - t) < 0.5 and math.abs(rects[m - 1] - b) < 0.5 then
-          rects[m - 2] = xb
-        else
-          rects[m + 1], rects[m + 2] = x1 + (j - 1) * cw, t
-          rects[m + 3], rects[m + 4], rects[m + 5] = xb, b, k
-          m, run = m + 5, true
-        end
+        rects[m + 1], rects[m + 2] = x1 + (j - 1) * cw, t
+        rects[m + 3], rects[m + 4], rects[m + 5] = xb, b, k
+        m, run = m + 5, true
       end
     end
   end
