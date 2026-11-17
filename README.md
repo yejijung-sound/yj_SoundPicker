@@ -9,8 +9,20 @@ Drag or press "S" key to spot to your session, with everything you set baked ont
 ‼️[ReaImGui](https://reapack.com/) and [SWS](https://sws-extension.org/) must be installed to use yj_SoundPicker‼️
 1. Make sure you have at least one Media Explorer database
 2. Extensions > ReaPack > Import repositories
-3. Paste the repository URL
+   
+   <img width="421" height="167" alt="image" src="https://github.com/user-attachments/assets/a6a20ca5-fc04-4d59-9cb0-fb679437abe2" />
+
+3. Paste the repository URL: https://github.com/yejijung-sound/yj_SoundPicker/raw/main/index.xml
+
+   <img width="432" height="160" alt="image" src="https://github.com/user-attachments/assets/ae2372fd-781d-4fd7-a3e2-52fab71b9304" />
+
 4. Extensions > ReaPack > Browse packages, find yj_SoundPicker, install
+
+   <img width="440" height="316" alt="image" src="https://github.com/user-attachments/assets/e1a892f2-cf85-4ed9-bdb8-b9a8ba1219d6" />
+
+I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup Actions > Set global startup action), so you don't have to manually open it every time you open REAPER!
+
+<img width="541" height="156" alt="image" src="https://github.com/user-attachments/assets/ba73a227-1575-4494-8fe1-49f29e97776b" />
 
 ## KEY FEATURES
 ### Search
@@ -56,4 +68,4 @@ Drag or press "S" key to spot to your session, with everything you set baked ont
 - Ctrl + click: add or remove a result from the selection
 - Shift + click: select a run of results
 - Double-click: spot that result
-- Ctrl + click or rightclick slider:	reset it
+- Ctrl + click or right click slider: reset the slider value
