@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <index version="1" name="yj_SoundPicker">
   <category name="Sound Design">
-    <reapack name="yj_SoundPicker.lua" type="script" desc="yj_SoundPicker: search, preview and spot sounds from your REAPER Media Explorer databases">
+    <reapack name="yj_SoundPicker.lua" type="script" desc="yj_SoundPicker">
       <version name="1.0" author="Yeji Jung" time="2026-11-17T06:00:00Z">
         <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundPicker.lua</source>
       </version>
