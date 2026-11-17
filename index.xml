@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" name="yj_SoundPicker">
+  <category name="Sound Design">
+    <reapack name="yj_SoundPicker.lua" type="script" desc="yj_SoundPicker: search, preview and spot sounds from your REAPER Media Explorer databases">
+      <version name="1.0" author="Yeji Jung" time="2026-11-17T06:00:00Z">
+        <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundPicker.lua</source>
+      </version>
+      <metadata>
+        <description><![CDATA[Reads your existing Media Explorer databases (MediaDB/*.ReaperFileList).
+
+Search: words (AND), OR / comma, NOT / -word, "exact phrase", field:word
+Tokens: 48k 48k+ 44k-   1ch 2ch+   24b 16b-   2s 0.5s- 10s+ 3s=
+
+Preview with waveform, range selection, pitch, fit-to-length, EQ and compressor, then spot or drag to the selected track at the edit cursor.
+
+Requires ReaImGui and SWS, both via ReaPack.]]></description>
+        <link rel="website" href="https://github.com/yejijung-sound/yj_SoundPicker">GitHub</link>
+      </metadata>
+    </reapack>
+  </category>
+</index>
