@@ -1,6 +1,6 @@
 -- @description yj_SoundPicker
--- @creator Yeji Jung
--- @version 1.0
+-- @author Yeji Jung
+-- @version 1.01
 -- @about
 --   Reads your existing Media Explorer databases (MediaDB/*.ReaperFileList).
 --   Search: words (AND), OR / comma, NOT / -word, "exact phrase", field:word
@@ -44,6 +44,7 @@ local SCRIPT        = 'yj_SoundPicker'
 local SEP           = package.config:sub(1, 1)
 local RESOURCE      = reaper.GetResourcePath()
 local WAVE_POINTS   = 4000  -- peaks per file: one per pixel even on a wide window
+local COLS = { 'Name', 'Description', 'Category', 'Length', 'SR', 'Ch', 'Bit', 'Library' }
 local MAX_WAVE_LEN  = 900   -- seconds; longer files show no waveform
 local TRASH_FRAMES  = 30    -- frames to wait before freeing a stopped preview's source
 local GLUE_CMD      = 40362 -- Item: Glue items, ignoring time selection
@@ -88,7 +89,7 @@ local S = {
   theme    = ({ rose = 'rose', sage = 'sage', rainbow = 'rainbow', simple = 'simple' })[reaper.GetExtState(SCRIPT, 'theme')] or 'simple',
   mode     = (reaper.GetExtState(SCRIPT, 'mode') == 'light') and 'light' or 'dark',
   font_size = get_num('font_size', 13),
-  icons    = (reaper.GetExtState(SCRIPT, 'icons') == 'pixel') and 'pixel' or 'smooth',
+  icons    = ({ pixel = 'pixel', smooth = 'smooth', bulky = 'bulky' })[reaper.GetExtState(SCRIPT, 'icons')] or 'smooth',
   pitch_unit = (reaper.GetExtState(SCRIPT, 'pitch_unit') == 'rate') and 'rate' or 'st',
   mon_db   = get_num('mon_db', 0),
   spectral = get_bool('spectral', true),
@@ -97,6 +98,11 @@ local S = {
   advance  = get_bool('advance', true),
   dock     = get_num('dock', 0), -- 0 = floating, negative = REAPER docker
   tips     = get_bool('tips', true),
+  fx_keep  = get_bool('fx_keep', false), -- hold the EQ and comp across sounds
+  show_wave = get_bool('show_wave', true),
+  show_fx   = get_bool('show_fx', true),
+  wave_top  = get_bool('wave_top', false),
+  cols_off = reaper.GetExtState(SCRIPT, 'cols_off'), -- pipe-joined names of hidden columns
   settings_win = false,
 }
 local NO_SAVE = { vol_db = true, pitch = true, fit = true, reverse = true, eq_on = true, comp_on = true, settings_win = true }
@@ -1522,12 +1528,13 @@ local function select_index(i)
     sel_a, sel_b = nil, nil
     play_pos = 0
     wf_request = f
-    -- EQ and comp start fresh for every sound
-    for k, v in pairs(EQ_DEF) do S[k] = v end
-    for k, v in pairs(CO_DEF) do S[k] = v end
-    S.eq_on, S.comp_on = false, false
-    apply_eq()
-    apply_comp()
+    if not S.fx_keep then -- EQ and comp start fresh for every sound unless pinned
+      for k, v in pairs(EQ_DEF) do S[k] = v end
+      for k, v in pairs(CO_DEF) do S[k] = v end
+      S.eq_on, S.comp_on = false, false
+      apply_eq()
+      apply_comp()
+    end
   end
   autoplay_pending = S.autoplay and f or nil
 end
@@ -1579,6 +1586,16 @@ local function copy_to_project(path)
   return dest
 end
 
+-- Keeps a span inside a source. Returns nil when there is nothing real to place,
+-- which is what stops a zero length or past-the-end item reaching REAPER.
+local function clamp_span(s, e, srclen)
+  if not srclen or srclen <= 0 then return nil end
+  s = math.max(0, math.min(s or 0, srclen))
+  e = math.max(0, math.min(e or srclen, srclen))
+  if e - s < 0.001 then return nil end
+  return s, e
+end
+
 -- whole: ignore the waveform selection (dragging a row from the list)
 local function spot(track_in, pos_in, whole)
   if not cur then return end
@@ -1602,6 +1619,13 @@ local function spot(track_in, pos_in, whole)
   local srclen = (reaper.GetMediaSourceLength(src))
   local s, e = 0, srclen
   if not whole and sel_a and sel_b and sel_b - sel_a > 0.001 then s, e = sel_a, sel_b end
+  s, e = clamp_span(s, e, srclen) -- never place a span the file cannot back
+  if not s then
+    reaper.PCM_Source_Destroy(src)
+    notify('That file is empty or unreadable.')
+    reaper.Undo_EndBlock('yj_SoundPicker: spot', -1)
+    return
+  end
   local startoffs = s
   if S.reverse then
     -- s..e are on the reversed timeline: that is the file's (len-e)..(len-s), played backwards
@@ -1674,6 +1698,7 @@ end
 
 -- while dragging over the arrange view, a locked ghost item shows where the file will land
 local drag_out = nil
+local drag_cancelled = false -- Escape was pressed: no new drag until the button is up
 
 local function ghost_remove(d)
   if not d or not d.ghosts then return end
@@ -1703,10 +1728,13 @@ do
   local MAX_GHOSTS = 24
   local function make_ghost(f, tr, s_off, e_off)
     if not f or not reaper.file_exists(f.path) then return end
+    if not reaper.ValidatePtr2(0, tr, 'MediaTrack*') then return end
     local src = reaper.PCM_Source_CreateFromFile(f.path)
     if not src then return end
     local srclen = (reaper.GetMediaSourceLength(src))
-    local s, e = s_off or 0, e_off or srclen
+    -- the database length can disagree with the file, so clamp to what is really there
+    local s, e = clamp_span(s_off, e_off, srclen)
+    if not s then reaper.PCM_Source_Destroy(src) return end
     local rate = eff_rate()
     local item = reaper.AddMediaItemToTrack(tr)
     local take = reaper.AddTakeToMediaItem(item)
@@ -1724,6 +1752,7 @@ do
   end
 
   ghost_update = function(d, tr, pos)
+    if not reaper.ValidatePtr2(0, tr, 'MediaTrack*') then return end
     if not d.ghosts then
       d.ghosts = {}
       if d.keys then -- several files: one ghost each, end to end
@@ -1735,16 +1764,23 @@ do
       else
         local s_off, e_off
         if not d.whole and sel_a and sel_b and sel_b - sel_a > 0.001 and cur then
-          local srclen = cur.len or sel_b
           s_off, e_off = sel_a, sel_b
-          if S.reverse then s_off, e_off = srclen - sel_b, srclen - sel_a end
+          if S.reverse then
+            local l = source_len() -- the real length, not the database's idea of it
+            s_off, e_off = l - sel_b, l - sel_a
+          end
         end
         local g = make_ghost(cur, tr, s_off, e_off)
         if g then d.ghosts[1] = g end
       end
       d.gtr = tr
-      reaper.Main_OnCommand(PEAKS_CMD, 0) -- so the ghosts show their waveforms
-    elseif d.gtr ~= tr then
+    end
+    -- An undo, or anything else that removes an item, leaves a dangling pointer
+    -- behind. Check every ghost each frame rather than trusting the list.
+    for i = #d.ghosts, 1, -1 do
+      if not reaper.ValidatePtr2(0, d.ghosts[i].item, 'MediaItem*') then table.remove(d.ghosts, i) end
+    end
+    if d.gtr ~= tr then
       for _, g in ipairs(d.ghosts) do reaper.MoveMediaItemToTrack(g.item, tr) end
       d.gtr = tr
     end
@@ -1758,11 +1794,36 @@ do
   end
 end
 
+-- Cancelling a drag: Escape, or right-click.
+local function cancel_drag(ctx)
+  -- Right-click always lands: ImGui has the mouse captured for the whole drag.
+  if ImGui.IsMouseDown(ctx, ImGui.MouseButton_Right) then return true end
+  -- Escape only arrives if this window still holds focus, which is not a given once
+  -- the pointer is over the arrange, so ask the keyboard itself as well.
+  if ImGui.IsKeyDown(ctx, ImGui.Key_Escape) or ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+    return true
+  end
+  if reaper.JS_VKeys_GetState then
+    local ok, st = pcall(reaper.JS_VKeys_GetState, 0)
+    if ok and type(st) == 'string' and ((st:byte(28) or 0) ~= 0 or (st:byte(27) or 0) ~= 0) then
+      return true
+    end
+  end
+  return false
+end
+
 local function handle_drop(ctx)
-  if not drag_out then return end
-  local d = drag_out
+  if not drag_out and not drag_cancelled then return end
   local down = ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left)
   if reaper.JS_Mouse_GetState then down = (reaper.JS_Mouse_GetState(1) & 1) == 1 end
+  if drag_cancelled and not down then drag_cancelled = false end
+  if not drag_out then return end
+  local d = drag_out
+  if cancel_drag(ctx) then -- cancelled: drop nothing, even with the button still held
+    ghost_remove(d)
+    drag_out, drag_cancelled = nil, down
+    return
+  end
   if down then
     local tr, pos = drop_target()
     if tr then
@@ -1836,7 +1897,7 @@ do
         ScrollbarGrabHovered = 0xAA7C80FF, ScrollbarGrabActive = 0x9C6F73FF,
         CheckMark = 0x6E3A4AFF, SliderGrab = 0xB17D81FF, SliderGrabActive = 0x98646EFF,
         Button = 0xE2BBBBFF, ButtonHovered = 0xE7C5C5FF, ButtonActive = 0xEBD0D0FF,
-        Header = 0xF7E6E8FF, HeaderHovered = 0xE1B7B7FF, HeaderActive = 0xFAEEEFFF,
+        Header = 0xF7E6E8FF, HeaderHovered = 0xCE9596FF, HeaderActive = 0xFAEEEFFF,
         Separator = 0xB38285FF, SeparatorHovered = 0x9C6F73FF, SeparatorActive = 0x6E3A4AFF,
         ResizeGrip = 0xC39194FF, ResizeGripHovered = 0xAA7C80FF, ResizeGripActive = 0x98646EFF,
         Tab = 0xC39194FF, TabHovered = 0xE4C0C0FF, TabActive = 0xB17D81FF,
@@ -1865,7 +1926,7 @@ do
         ScrollbarGrabHovered = 0x888F83FF, ScrollbarGrabActive = 0x7B8277FF,
         CheckMark = 0x50584BFF, SliderGrab = 0x8B9386FF, SliderGrabActive = 0x798074FF,
         Button = 0xBFC6BAFF, ButtonHovered = 0xC6CDC1FF, ButtonActive = 0xCDD3C9FF,
-        Header = 0xDDE2DAFF, HeaderHovered = 0xBDC4B7FF, HeaderActive = 0xE2E7DFFF,
+        Header = 0xDDE2DAFF, HeaderHovered = 0xA3AC9BFF, HeaderActive = 0xE2E7DFFF,
         Separator = 0x8F9689FF, SeparatorHovered = 0x7B8277FF, SeparatorActive = 0x50584BFF,
         ResizeGrip = 0x9DA597FF, ResizeGripHovered = 0x888F83FF, ResizeGripActive = 0x798074FF,
         Tab = 0x9DA597FF, TabHovered = 0xC2C9BEFF, TabActive = 0x8B9386FF,
@@ -2091,8 +2152,9 @@ do
   -- smooth versions, drawn in the same box as the pixel ones
   local D = ImGui
   local VEC = {}
+  local KT, KD = 1, 1 -- stroke and accent weight: 1 for outline, heavier for bulky
   local CLOSED = ImGui.DrawFlags_Closed
-  local function sw(h) return math.max(1.4, math.floor(h / 9 * 10 + 0.5) / 10) end -- stroke width
+  local function sw(h) return math.max(1.4, math.floor(h / 9 * 10 + 0.5) / 10) * KT end -- stroke width
   local function poly(dl, c, t, closed, ...)
     local p = { ... }
     D.DrawList_PathClear(dl)
@@ -2117,7 +2179,7 @@ do
     D.DrawList_AddRectFilled(dl, bx + z * 0.18, by + z * 0.18, bx + z * 0.82, by + z * 0.82, c, z * 0.12)
   end
   VEC.dot = function(dl, x, y, w, h, c)
-    D.DrawList_AddCircleFilled(dl, x + w / 2, y + h / 2, math.min(w, h) * 0.3, c, 16)
+    D.DrawList_AddCircleFilled(dl, x + w / 2, y + h / 2, math.min(w, h) * 0.3 * KD, c, 16)
   end
   VEC.loop = function(dl, x, y, w, h, c)
     local bx, by, z = box(x, y, w, h)
@@ -2177,18 +2239,19 @@ do
     for i, k in ipairs({ 0.3, 0.7, 0.45 }) do
       local yy = by + z * (0.2 + (i - 1) * 0.3)
       poly(dl, c, t, false, bx + z * 0.06, yy, bx + z * 0.94, yy)
-      D.DrawList_AddCircleFilled(dl, bx + z * k, yy, z * 0.12, c, 12)
+      D.DrawList_AddCircleFilled(dl, bx + z * k, yy, z * 0.12 * KD, c, 12)
     end
   end
   VEC.help = function(dl, x, y, w, h, c)
     local bx, by, z = box(x, y, w, h)
     local cx, cy, t = bx + z / 2, by + z / 2, sw(z)
     D.DrawList_AddCircle(dl, cx, cy, z * 0.46, c, 24, t)
+    local q = math.min(t, z * 0.13) -- the question mark closes up if it follows the ring
     D.DrawList_PathClear(dl)
     D.DrawList_PathArcTo(dl, cx, by + z * 0.38, z * 0.14, math.pi * 1.1, math.pi * 2.35, 12)
     D.DrawList_PathLineTo(dl, cx, by + z * 0.6)
-    D.DrawList_PathStroke(dl, c, 0, t)
-    D.DrawList_AddCircleFilled(dl, cx, by + z * 0.74, t * 0.75, c, 8)
+    D.DrawList_PathStroke(dl, c, 0, q)
+    D.DrawList_AddCircleFilled(dl, cx, by + z * 0.74, q * 0.75, c, 8)
   end
   VEC.eq = function(dl, x, y, w, h, c)
     local bx, by, z = box(x, y, w, h)
@@ -2196,7 +2259,7 @@ do
     for i, k in ipairs({ 0.62, 0.3, 0.52 }) do
       local xx = bx + z * (0.2 + (i - 1) * 0.3)
       poly(dl, c, t, false, xx, by + z * 0.08, xx, by + z * 0.92)
-      D.DrawList_AddRectFilled(dl, xx - z * 0.11, by + z * k - z * 0.07, xx + z * 0.11, by + z * k + z * 0.07, c, 1)
+      D.DrawList_AddRectFilled(dl, xx - z * 0.11 * KD, by + z * k - z * 0.07 * KD, xx + z * 0.11 * KD, by + z * k + z * 0.07 * KD, c, 1)
     end
   end
   VEC.comp = function(dl, x, y, w, h, c)
@@ -2209,13 +2272,20 @@ do
     local bx, by, z = box(x, y, w, h)
     D.DrawList_AddRect(dl, bx + z * 0.06, by + z * 0.06, bx + z * 0.94, by + z * 0.94, c, z * 0.18, 0, sw(z))
     for _, p in ipairs({ { 0.32, 0.32 }, { 0.68, 0.32 }, { 0.5, 0.5 }, { 0.32, 0.68 }, { 0.68, 0.68 } }) do
-      D.DrawList_AddCircleFilled(dl, bx + z * p[1], by + z * p[2], z * 0.075, c, 10)
+      D.DrawList_AddCircleFilled(dl, bx + z * p[1], by + z * p[2], z * 0.075 * KD, c, 10)
     end
   end
 
+
   draw_icon = function(dl, name, x, y, px, col)
     local ic = ICON[name]
-    if S.icons == 'smooth' then return VEC[name](dl, x, y, ic.w * px, ic.h * px, col) end
+    if S.icons ~= 'pixel' then
+      -- same shapes either way; bulky just draws them heavier
+      KT, KD = (S.icons == 'bulky') and 1.45 or 1, (S.icons == 'bulky') and 1.15 or 1
+      -- vector shapes sit inset in their box, so grow them to read at the pixel set's size
+      local gw, gh = ic.w * px * 0.15, ic.h * px * 0.15
+      return VEC[name](dl, x - gw / 2, y - gh / 2, ic.w * px + gw, ic.h * px + gh, col)
+    end
     x, y = math.floor(x), math.floor(y)
     for _, r in ipairs(ic.runs) do
       ImGui.DrawList_AddRectFilled(dl, x + r[2] * px, y + r[1] * px, x + r[3] * px, y + r[4] * px, col)
@@ -2392,7 +2462,7 @@ local function draw_waveform(w, h)
   -- shortest selection: 0.5 s (or a quarter of very short files)
   local min_sel = math.min(0.5, len * 0.25)
   if sel_grab and ImGui.IsItemActive(ctx) and ImGui.IsMouseDragging(ctx, ImGui.MouseButton_Left, 6) then
-    if not drag_out then drag_out = { whole = false } end -- dragging the selection out
+    if not drag_out and not drag_cancelled then drag_out = { whole = false } end -- dragging the selection out
   elseif ImGui.IsItemActive(ctx) and drag_start and not sel_grab and ImGui.IsMouseDragging(ctx, ImGui.MouseButton_Left, 3) then
     dragging = true
     local t = t_at(mx)
@@ -3015,235 +3085,268 @@ local function loop()
     local fx_base = ImGui.GetFrameHeightWithSpacing(ctx) * 3 - 7
     UI.wide = aw_full >= UI.sz(830) + UI.sz(620)
     local function bottom(wave_h, fx_h)
-      local controls = UI.wide and math.max(rows2, fx_h) or (rows2 + 10 + fx_h)
+      local controls = (UI.wide and S.show_fx) and math.max(rows2, fx_h) or (rows2 + (S.show_fx and 10 + fx_h or 0))
       return th + 10 + wave_h + 10 + controls + 14
     end
-    local extra = math.max(0, avail_h - 160 - bottom(100, fx_base))
-    local wave_h = math.min(360, 100 + extra * 0.25)
-    UI.fx_h = math.min(UI.sz(320), fx_base + extra * 0.2)
+    if not S.show_fx then fx_base = 0 end
+    local extra = math.max(0, avail_h - 160 - bottom(S.show_wave and 100 or 0, fx_base))
+    local wave_h = S.show_wave and math.min(360, 100 + extra * 0.25) or 0
+    UI.fx_h = S.show_fx and math.min(UI.sz(320), fx_base + extra * 0.2) or 0
     local table_h = math.max(120, avail_h - bottom(wave_h, UI.fx_h))
 
-    local tx, ty = ImGui.GetCursorScreenPos(ctx)
-    local tw = ImGui.GetContentRegionAvail(ctx)
-    local tflags = ImGui.TableFlags_ScrollY | ImGui.TableFlags_RowBg
-                 | ImGui.TableFlags_Resizable | ImGui.TableFlags_BordersInnerV
-    if ImGui.BeginTable(ctx, 'results', 8, tflags, 0, table_h) then
-      ImGui.TableSetupScrollFreeze(ctx, 0, 1)
-      ImGui.TableSetupColumn(ctx, 'Name', ImGui.TableColumnFlags_WidthStretch, 3)
-      ImGui.TableSetupColumn(ctx, 'Description', ImGui.TableColumnFlags_WidthStretch, 4)
-      ImGui.TableSetupColumn(ctx, 'Category', ImGui.TableColumnFlags_WidthStretch, 1.2)
-      ImGui.TableSetupColumn(ctx, 'Length', ImGui.TableColumnFlags_WidthFixed, UI.sz(62))
-      ImGui.TableSetupColumn(ctx, 'SR', ImGui.TableColumnFlags_WidthFixed, UI.sz(44))
-      ImGui.TableSetupColumn(ctx, 'Ch', ImGui.TableColumnFlags_WidthFixed, UI.sz(26))
-      ImGui.TableSetupColumn(ctx, 'Bit', ImGui.TableColumnFlags_WidthFixed, UI.sz(28))
-      ImGui.TableSetupColumn(ctx, 'Library', ImGui.TableColumnFlags_WidthStretch, 1.4)
-      ImGui.TableHeadersRow(ctx)
-
-      local row_h = ImGui.GetTextLineHeightWithSpacing(ctx)
-      if scroll_top then ImGui.SetScrollY(ctx, 0); scroll_top = false end
-      if scroll_to then
-        local target = scroll_to * row_h
-        local sy = ImGui.GetScrollY(ctx)
-        local wh = ImGui.GetWindowHeight(ctx)
-        if target - row_h < sy + row_h then
-          ImGui.SetScrollY(ctx, math.max(0, target - 2 * row_h))
-        elseif target + row_h > sy + wh then
-          ImGui.SetScrollY(ctx, target + row_h - wh)
+    local function list_pane()
+      local tx, ty = ImGui.GetCursorScreenPos(ctx)
+      local tw = ImGui.GetContentRegionAvail(ctx)
+      local tflags = ImGui.TableFlags_ScrollY | ImGui.TableFlags_RowBg
+                   | ImGui.TableFlags_Resizable | ImGui.TableFlags_BordersInnerV
+                   | ImGui.TableFlags_Hideable | ImGui.TableFlags_Reorderable
+      if ImGui.BeginTable(ctx, 'results', 8, tflags, 0, table_h) then
+        ImGui.TableSetupScrollFreeze(ctx, 0, 1)
+        local off = {}
+        for nm in (S.cols_off or ''):gmatch('[^|]+') do off[nm] = true end
+        local function col(name, flags, w)
+          if off[name] then flags = flags | ImGui.TableColumnFlags_DefaultHide end
+          ImGui.TableSetupColumn(ctx, name, flags, w)
         end
-        scroll_to = nil
-      end
-
-      local sflags = ImGui.SelectableFlags_SpanAllColumns | ImGui.SelectableFlags_AllowDoubleClick
-      local row_drag = ImGui.IsMouseDragging(ctx, ImGui.MouseButton_Left, 6)
-      ImGui.ListClipper_Begin(clipper, #results)
-      while ImGui.ListClipper_Step(clipper) do
-        local ds, de = ImGui.ListClipper_GetDisplayRange(clipper)
-        for i = ds + 1, de do
-          local f = get_info(results[i])
-          ImGui.TableNextRow(ctx)
-          ImGui.TableNextColumn(ctx)
-          if i == sel_idx then
-            local rx, ry = ImGui.GetCursorScreenPos(ctx)
-            ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx), rx - 7, ry - 2, rx - 3,
-              ry + ImGui.GetTextLineHeight(ctx) + 2, T.heart, 2)
-          end
-          local is_sel = (MS.n > 1) and (MS.keys[results[i]] == true) or (MS.n <= 1 and i == sel_idx)
-          if is_sel then -- hovering the chosen row keeps its highlight
-            ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, T.cols.Header)
-            ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, T.cols.Header)
-          end
-          local clicked = ImGui.Selectable(ctx, f.name .. '##r' .. i, is_sel, sflags)
-          if is_sel then ImGui.PopStyleColor(ctx, 2) end
-          if clicked then
-            local mods = ImGui.GetKeyMods(ctx)
-            local k = results[i]
-            if (mods & ImGui.Mod_Shift) ~= 0 then
-              local a = MS.anchor_index() or sel_idx
-              if a < 1 then a = i end
-              MS.range(a, i)
-              select_index(i)
-            elseif (mods & ImGui.Mod_Ctrl) ~= 0 then
-              if MS.n == 0 and sel_idx > 0 and sel_idx ~= i then MS.single(results[sel_idx]) end
-              MS.toggle(k)
-              if MS.keys[k] then select_index(i) end
-            else
-              MS.single(k)
-              select_index(i)
-              if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then spot() end
+        col('Name', ImGui.TableColumnFlags_WidthStretch | ImGui.TableColumnFlags_NoHide, 3)
+        col('Description', ImGui.TableColumnFlags_WidthStretch, 4)
+        col('Category', ImGui.TableColumnFlags_WidthStretch, 1.2)
+        col('Length', ImGui.TableColumnFlags_WidthFixed, UI.sz(62))
+        col('SR', ImGui.TableColumnFlags_WidthFixed, UI.sz(44))
+        col('Ch', ImGui.TableColumnFlags_WidthFixed, UI.sz(26))
+        col('Bit', ImGui.TableColumnFlags_WidthFixed, UI.sz(28))
+        col('Library', ImGui.TableColumnFlags_WidthStretch, 1.4)
+        ImGui.TableHeadersRow(ctx)
+        do -- right-click the header to hide a column; remember that across sessions
+          local hidden, n = {}, 0
+          for c = 0, #COLS - 1 do
+            if c > 0 and (ImGui.TableGetColumnFlags(ctx, c) & ImGui.TableColumnFlags_IsEnabled) == 0 then
+              n = n + 1 -- column 0 is Name, which carries the row and cannot be hidden
+              hidden[n] = COLS[c + 1]
             end
           end
-          if row_drag and not drag_out and ImGui.IsItemActive(ctx) then
-            if MS.n > 1 and MS.keys[results[i]] then
-              drag_out = { whole = true, keys = MS.list() }
-            else
-              if i ~= sel_idx then MS.single(results[i]); select_index(i) end
-              drag_out = { whole = true }
+          local now_hidden = table.concat(hidden, '|')
+          if now_hidden ~= S.cols_off then S.cols_off = now_hidden end
+        end
+
+        local row_h = ImGui.GetTextLineHeightWithSpacing(ctx)
+        if scroll_top then ImGui.SetScrollY(ctx, 0); scroll_top = false end
+        if scroll_to then
+          local target = scroll_to * row_h
+          local sy = ImGui.GetScrollY(ctx)
+          local wh = ImGui.GetWindowHeight(ctx)
+          if target - row_h < sy + row_h then
+            ImGui.SetScrollY(ctx, math.max(0, target - 2 * row_h))
+          elseif target + row_h > sy + wh then
+            ImGui.SetScrollY(ctx, target + row_h - wh)
+          end
+          scroll_to = nil
+        end
+
+        local sflags = ImGui.SelectableFlags_SpanAllColumns | ImGui.SelectableFlags_AllowDoubleClick
+        local row_drag = ImGui.IsMouseDragging(ctx, ImGui.MouseButton_Left, 6)
+        ImGui.ListClipper_Begin(clipper, #results)
+        while ImGui.ListClipper_Step(clipper) do
+          local ds, de = ImGui.ListClipper_GetDisplayRange(clipper)
+          for i = ds + 1, de do
+            local f = get_info(results[i])
+            ImGui.TableNextRow(ctx)
+            ImGui.TableNextColumn(ctx)
+            if i == sel_idx then
+              local rx, ry = ImGui.GetCursorScreenPos(ctx)
+              ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx), rx - 7, ry - 2, rx - 3,
+                ry + ImGui.GetTextLineHeight(ctx) + 2, T.heart, 2)
+            end
+            local is_sel = (MS.n > 1) and (MS.keys[results[i]] == true) or (MS.n <= 1 and i == sel_idx)
+            if is_sel then -- hovering the chosen row keeps its highlight
+              ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, T.cols.Header)
+              ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, T.cols.Header)
+            end
+            local clicked = ImGui.Selectable(ctx, f.name .. '##r' .. i, is_sel, sflags)
+            if is_sel then ImGui.PopStyleColor(ctx, 2) end
+            if clicked then
+              local mods = ImGui.GetKeyMods(ctx)
+              local k = results[i]
+              if (mods & ImGui.Mod_Shift) ~= 0 then
+                local a = MS.anchor_index() or sel_idx
+                if a < 1 then a = i end
+                MS.range(a, i)
+                select_index(i)
+              elseif (mods & ImGui.Mod_Ctrl) ~= 0 then
+                if MS.n == 0 and sel_idx > 0 and sel_idx ~= i then MS.single(results[sel_idx]) end
+                MS.toggle(k)
+                if MS.keys[k] then select_index(i) end
+              else
+                MS.single(k)
+                select_index(i)
+                if ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then spot() end
+              end
+            end
+            if row_drag and not drag_out and not drag_cancelled and ImGui.IsItemActive(ctx) then
+              if MS.n > 1 and MS.keys[results[i]] then
+                drag_out = { whole = true, keys = MS.list() }
+              else
+                if i ~= sel_idx then MS.single(results[i]); select_index(i) end
+                drag_out = { whole = true }
+              end
+            end
+            for c, txt in ipairs(f.cells) do
+              -- a hidden column must not be drawn into, or the table's own stack breaks
+              if txt ~= '' and ImGui.TableSetColumnIndex(ctx, c) then ImGui.Text(ctx, txt) end
+            end
+            if (f.maker or f.lib ~= f.db) and ImGui.IsItemHovered(ctx) then
+              ImGui.SetTooltip(ctx, (f.maker and (f.maker .. '  /  ') or '') .. f.lib .. '\ndatabase: ' .. f.db)
             end
           end
-          for c, txt in ipairs(f.cells) do
-            if txt ~= '' then
-              ImGui.TableSetColumnIndex(ctx, c)
-              ImGui.Text(ctx, txt)
-            end
-          end
-          if (f.maker or f.lib ~= f.db) and ImGui.IsItemHovered(ctx) then
-            ImGui.SetTooltip(ctx, (f.maker and (f.maker .. '  /  ') or '') .. f.lib .. '\ndatabase: ' .. f.db)
+        end
+        ImGui.EndTable(ctx)
+      end
+      if not search_active and not loading and #dbs > 0 then
+        local dl = ImGui.GetWindowDrawList(ctx)
+        local msg = 'type something to start searching'
+        local mw, lh = ImGui.CalcTextSize(ctx, msg)
+        local head = ImGui.GetFrameHeight(ctx)
+        local cx = tx + tw / 2
+        local cy = ty + head + (table_h - head) / 2
+        local ty1 = cy - lh / 2
+        ImGui.DrawList_AddText(dl, cx - mw / 2, ty1, T.cols.TextDisabled, msg)
+        draw_icon(dl, 'sparkle', cx - mw / 2 - 22, cy - 7, 2, T.sparkle)
+        draw_icon(dl, 'sparkle', cx + mw / 2 + 8, cy - 7, 2, T.sparkle)
+      end
+
+    end
+
+    local function preview_pane()
+      ImGui.Separator(ctx)
+      if cur then
+        ImGui.Text(ctx, cur.name)
+        ImGui.SameLine(ctx)
+        ImGui.TextColored(ctx, T.heart, (cur.maker and (cur.maker .. '  /  ') or '') .. cur.lib)
+        ImGui.SameLine(ctx)
+        ImGui.TextDisabled(ctx, ('%s  %s  %sch  %sbit   %s%s'):format(
+          fmt_len(source_len()), fmt_sr(cur.sr), tostring(cur.ch or '?'), tostring(cur.bits or '?'),
+          (sel_a and sel_b) and ('selection ' .. fmt_len(sel_b - sel_a) .. '   ') or '',
+          S.reverse and 'reversed' or ''))
+      else
+        ImGui.TextDisabled(ctx, 'select a result to preview')
+      end
+      if S.show_wave then
+        local ww = ImGui.GetContentRegionAvail(ctx)
+        draw_waveform(ww, wave_h)
+      end
+
+      local two_col = (UI.wide and S.show_fx) and ImGui.BeginTable(ctx, 'controls', 2, 0)
+      if two_col then
+        ImGui.TableSetupColumn(ctx, 'left', ImGui.TableColumnFlags_WidthFixed, UI.sz(830))
+        ImGui.TableSetupColumn(ctx, 'right', ImGui.TableColumnFlags_WidthStretch, 1)
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx)
+      end
+
+      -- transport
+      if icon_button('##play', playing and 'stop' or 'play', playing and 'Stop' or 'Play', playing, 'Play / stop (Space)') then
+        toggle_play()
+      end
+      ImGui.SameLine(ctx)
+      if icon_button('##loop', 'loop', nil, S.loop, 'Loop') then
+        S.loop = not S.loop
+        apply_preview_params()
+      end
+      ImGui.SameLine(ctx)
+      if icon_button('##rev', 'rev', nil, S.reverse,
+          HAS_SECTION and 'Reverse (preview and spot)' or 'Reverse needs SWS 2.13.2 or newer', not HAS_SECTION) then
+        set_reverse(not S.reverse)
+      end
+      ImGui.SameLine(ctx)
+      ImGui.AlignTextToFramePadding(ctx)
+      _, S.autoplay = ImGui.Checkbox(ctx, 'Auto-play', S.autoplay)
+      ImGui.SameLine(ctx)
+      if icon_button('##spot', 'spot', 'Spot (S)', false,
+          'Inserts the file (or waveform selection) at the edit cursor\non the selected track, with pitch, volume and reverse applied.\nWith several files selected, they go in one after another.') then
+        spot_selected()
+      end
+      ImGui.SameLine(ctx, 0, 16)
+      ImGui.SetNextItemWidth(ctx, UI.sz(100))
+      local nout = math.max(2, reaper.GetNumAudioOutputs())
+      local function pair_label(i) return ('Out %d/%d'):format(i * 2 + 1, i * 2 + 2) end
+      if ImGui.BeginCombo(ctx, '##out', pair_label(math.floor(S.outpair))) then
+        for i = 0, nout // 2 - 1 do
+          if ImGui.Selectable(ctx, pair_label(i), i == S.outpair) then
+            S.outpair = i
+            fx_route()
+            if playing then play(play_pos) end
           end
         end
+        ImGui.EndCombo(ctx)
       end
-      ImGui.EndTable(ctx)
-    end
-    if not search_active and not loading and #dbs > 0 then
-      local dl = ImGui.GetWindowDrawList(ctx)
-      local msg = 'type something to start searching'
-      local mw, lh = ImGui.CalcTextSize(ctx, msg)
-      local head = ImGui.GetFrameHeight(ctx)
-      local cx = tx + tw / 2
-      local cy = ty + head + (table_h - head) / 2
-      local ty1 = cy - lh / 2
-      ImGui.DrawList_AddText(dl, cx - mw / 2, ty1, T.cols.TextDisabled, msg)
-      draw_icon(dl, 'sparkle', cx - mw / 2 - 22, cy - 7, 2, T.sparkle)
-      draw_icon(dl, 'sparkle', cx + mw / 2 + 8, cy - 7, 2, T.sparkle)
-    end
-
-    ImGui.Separator(ctx)
-    if cur then
-      ImGui.Text(ctx, cur.name)
-      ImGui.SameLine(ctx)
-      ImGui.TextColored(ctx, T.heart, (cur.maker and (cur.maker .. '  /  ') or '') .. cur.lib)
-      ImGui.SameLine(ctx)
-      ImGui.TextDisabled(ctx, ('%s  %s  %sch  %sbit   %s%s'):format(
-        fmt_len(source_len()), fmt_sr(cur.sr), tostring(cur.ch or '?'), tostring(cur.bits or '?'),
-        (sel_a and sel_b) and ('selection ' .. fmt_len(sel_b - sel_a) .. '   ') or '',
-        S.reverse and 'reversed' or ''))
-    else
-      ImGui.TextDisabled(ctx, 'select a result to preview')
-    end
-    local ww = ImGui.GetContentRegionAvail(ctx)
-    draw_waveform(ww, wave_h)
-
-    local two_col = UI.wide and ImGui.BeginTable(ctx, 'controls', 2, 0)
-    if two_col then
-      ImGui.TableSetupColumn(ctx, 'left', ImGui.TableColumnFlags_WidthFixed, UI.sz(830))
-      ImGui.TableSetupColumn(ctx, 'right', ImGui.TableColumnFlags_WidthStretch, 1)
-      ImGui.TableNextRow(ctx)
-      ImGui.TableNextColumn(ctx)
-    end
-
-    -- transport
-    if icon_button('##play', playing and 'stop' or 'play', playing and 'Stop' or 'Play', playing, 'Play / stop (Space)') then
-      toggle_play()
-    end
-    ImGui.SameLine(ctx)
-    if icon_button('##loop', 'loop', nil, S.loop, 'Loop') then
-      S.loop = not S.loop
-      apply_preview_params()
-    end
-    ImGui.SameLine(ctx)
-    if icon_button('##rev', 'rev', nil, S.reverse,
-        HAS_SECTION and 'Reverse (preview and spot)' or 'Reverse needs SWS 2.13.2 or newer', not HAS_SECTION) then
-      set_reverse(not S.reverse)
-    end
-    ImGui.SameLine(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    _, S.autoplay = ImGui.Checkbox(ctx, 'Auto-play', S.autoplay)
-    ImGui.SameLine(ctx)
-    if icon_button('##spot', 'spot', 'Spot (S)', false,
-        'Inserts the file (or waveform selection) at the edit cursor\non the selected track, with pitch, volume and reverse applied.\nWith several files selected, they go in one after another.') then
-      spot_selected()
-    end
-    ImGui.SameLine(ctx, 0, 16)
-    ImGui.SetNextItemWidth(ctx, UI.sz(100))
-    local nout = math.max(2, reaper.GetNumAudioOutputs())
-    local function pair_label(i) return ('Out %d/%d'):format(i * 2 + 1, i * 2 + 2) end
-    if ImGui.BeginCombo(ctx, '##out', pair_label(math.floor(S.outpair))) then
-      for i = 0, nout // 2 - 1 do
-        if ImGui.Selectable(ctx, pair_label(i), i == S.outpair) then
-          S.outpair = i
-          fx_route()
-          if playing then play(play_pos) end
-        end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Audio interface outputs used for previews (with or without EQ / comp).\nPreviews go straight to these outputs, so master FX and the master fader are not applied.')
       end
-      ImGui.EndCombo(ctx)
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, 'Audio interface outputs used for previews (with or without EQ / comp).\nPreviews go straight to these outputs, so master FX and the master fader are not applied.')
-    end
-    ImGui.SameLine(ctx, 0, 16)
-    inline_icon('speaker', T.icon, 2)
-    ImGui.SameLine(ctx, 0, 6)
-    local cm
-    cm, S.mon_db = slider('##mon', S.mon_db, -48, 12, 'mon %.0f dB', 0, 130,
-      'Monitor level: changes what you hear while auditioning only,\nnever the volume of spotted items. Ctrl+click to reset.')
-    if cm then apply_preview_params() end
+      ImGui.SameLine(ctx, 0, 16)
+      inline_icon('speaker', T.icon, 2)
+      ImGui.SameLine(ctx, 0, 6)
+      local cm
+      cm, S.mon_db = slider('##mon', S.mon_db, -48, 12, 'mon %.0f dB', 0, 130,
+        'Monitor level: changes what you hear while auditioning only,\nnever the volume of spotted items. Ctrl+click to reset.')
+      if cm then apply_preview_params() end
 
-    -- volume, pitch, fit
-    local changed, c = false, nil
-    c, S.vol_db = slider('Vol dB', S.vol_db, -36, 12, '%.1f', 0, 140,
-      'Item volume: used for previews and for spotted items. Ctrl+click to reset.')
-    changed = changed or c
-    ImGui.SameLine(ctx)
-    local ptip = 'With Preserve pitch off it also changes the speed, like tape (+12 st = 2.00x = twice as fast).\nCtrl+click to reset'
-    if S.pitch_unit == 'rate' then
-      local r = 2 ^ (S.pitch / 12)
-      c, r = slider('##pitch_x', r, 0.25, 4, '%.2fx', 1, 140, ptip, true)
-      if c then S.pitch = 12 * math.log(math.max(r, 1e-6), 2) end
-    else
-      c, S.pitch = slider('##pitch_st', S.pitch, -24, 24, '%.1f', 0, 140, ptip)
-    end
-    changed = changed or c
-    ImGui.SameLine(ctx, 0, 4)
-    ImGui.SetNextItemWidth(ctx, UI.sz(84))
-    if ImGui.BeginCombo(ctx, '##pitch_unit', S.pitch_unit == 'rate' and 'Pitch x' or 'Pitch st') then
-      if ImGui.Selectable(ctx, 'Semitones (st)', S.pitch_unit ~= 'rate') then S.pitch_unit = 'st' end
-      if ImGui.Selectable(ctx, 'Ratio (x)', S.pitch_unit == 'rate') then S.pitch_unit = 'rate' end
-      ImGui.EndCombo(ctx)
-    end
-    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Show pitch in semitones or as a ratio') end
-    ImGui.SameLine(ctx)
-    c, S.ppitch = ImGui.Checkbox(ctx, 'Preserve pitch', S.ppitch)
-    changed = changed or c
-    ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, UI.sz(80))
-    c, S.fit = ImGui.InputDouble(ctx, 'Fit to s', S.fit, 0, 0, '%.2f')
-    if S.fit < 0 then S.fit = 0 end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, 'Stretch the file (or selection) to this length in seconds.\n0 = off: the speed then follows Pitch (with Preserve pitch off).')
-    end
-    changed = changed or c
-    if S.fit > 0 and cur then
+      -- volume, pitch, fit
+      local changed, c = false, nil
+      c, S.vol_db = slider('Vol dB', S.vol_db, -36, 12, '%.1f', 0, 140,
+        'Item volume: used for previews and for spotted items. Ctrl+click to reset.')
+      changed = changed or c
       ImGui.SameLine(ctx)
-      ImGui.TextDisabled(ctx, ('= %.3fx'):format(eff_rate()))
-    end
-    if changed then apply_preview_params() end
+      local ptip = 'With Preserve pitch off it also changes the speed, like tape (+12 st = 2.00x = twice as fast).\nCtrl+click to reset'
+      if S.pitch_unit == 'rate' then
+        local r = 2 ^ (S.pitch / 12)
+        c, r = slider('##pitch_x', r, 0.25, 4, '%.2fx', 1, 140, ptip, true)
+        if c then S.pitch = 12 * math.log(math.max(r, 1e-6), 2) end
+      else
+        c, S.pitch = slider('##pitch_st', S.pitch, -24, 24, '%.1f', 0, 140, ptip)
+      end
+      changed = changed or c
+      ImGui.SameLine(ctx, 0, 4)
+      ImGui.SetNextItemWidth(ctx, UI.sz(84))
+      if ImGui.BeginCombo(ctx, '##pitch_unit', S.pitch_unit == 'rate' and 'Pitch x' or 'Pitch st') then
+        if ImGui.Selectable(ctx, 'Semitones (st)', S.pitch_unit ~= 'rate') then S.pitch_unit = 'st' end
+        if ImGui.Selectable(ctx, 'Ratio (x)', S.pitch_unit == 'rate') then S.pitch_unit = 'rate' end
+        ImGui.EndCombo(ctx)
+      end
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Show pitch in semitones or as a ratio') end
+      ImGui.SameLine(ctx)
+      c, S.ppitch = ImGui.Checkbox(ctx, 'Preserve pitch', S.ppitch)
+      changed = changed or c
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, UI.sz(80))
+      c, S.fit = ImGui.InputDouble(ctx, 'Fit to s', S.fit, 0, 0, '%.2f')
+      if S.fit < 0 then S.fit = 0 end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Stretch the file (or selection) to this length in seconds.\n0 = off: the speed then follows Pitch (with Preserve pitch off).')
+      end
+      changed = changed or c
+      if S.fit > 0 and cur then
+        ImGui.SameLine(ctx)
+        ImGui.TextDisabled(ctx, ('= %.3fx'):format(eff_rate()))
+      end
+      if changed then apply_preview_params() end
 
-    if two_col then
-      ImGui.TableNextColumn(ctx)
-      fx_area()
-      ImGui.EndTable(ctx)
+      if two_col then
+        ImGui.TableNextColumn(ctx)
+        fx_area()
+        ImGui.EndTable(ctx)
+      elseif S.show_fx then
+        ImGui.Dummy(ctx, 0, 2)
+        fx_area()
+      end
+    end
+
+    if S.wave_top then -- waveform and controls sit above the list
+      preview_pane()
+      ImGui.Separator(ctx)
+      list_pane()
     else
-      ImGui.Dummy(ctx, 0, 2)
-      fx_area()
+      list_pane()
+      preview_pane()
     end
 
     if ImGui.IsWindowFocused(ctx, ImGui.FocusedFlags_RootAndChildWindows) then
@@ -3299,8 +3402,8 @@ local function loop()
       pick('Theme', '##theme', S.theme:sub(1, 1):upper() .. S.theme:sub(2), THEME_NAMES, function(v) S.theme = v end)
       pick('Mode', '##mode', S.mode == 'dark' and 'Dark' or 'Light',
         { { 'light', 'Light' }, { 'dark', 'Dark' } }, function(v) S.mode = v end)
-      pick('Icons', '##icons', S.icons == 'smooth' and 'Smooth' or 'Pixel',
-        { { 'pixel', 'Pixel' }, { 'smooth', 'Smooth' } }, function(v) S.icons = v end)
+      pick('Icons', '##icons', ({ pixel = 'Pixel', smooth = 'Outline', bulky = 'Bulky' })[S.icons],
+        { { 'pixel', 'Pixel' }, { 'smooth', 'Outline' }, { 'bulky', 'Bulky' } }, function(v) S.icons = v end)
       local sizes = {}
       for _, z in ipairs(UI.SIZES) do sizes[#sizes + 1] = { z, z == 13 and '13 (default)' or tostring(z) } end
       pick('Font size', '##font', S.font_size == 13 and '13 (default)' or tostring(math.floor(S.font_size)),
@@ -3316,6 +3419,25 @@ local function loop()
       _, S.copy = ImGui.Checkbox(ctx, 'Copy to project', S.copy)
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, "Copies the file into this project's media folder before spotting,\nso the project keeps working when the library drive is offline.\nThe same file is only copied once.")
+      end
+      ImGui.Spacing(ctx); ImGui.Separator(ctx); ImGui.Spacing(ctx)
+
+      ImGui.TextDisabled(ctx, 'Panels')
+      _, S.show_wave = ImGui.Checkbox(ctx, 'Waveform', S.show_wave)
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Hide it for a list-only layout. Playback and spotting still work,\nbut there is no waveform to select a range in.')
+      end
+      _, S.show_fx = ImGui.Checkbox(ctx, 'EQ and compressor', S.show_fx)
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Hide the EQ and comp panels. Whatever is switched on stays on.')
+      end
+      _, S.fx_keep = ImGui.Checkbox(ctx, 'Keep EQ and Comp settings in between files', S.fx_keep)
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Off: both reset each time you pick another sound.\nOn: your settings stay put, so you can audition several\nfiles through the same band.')
+      end
+      _, S.wave_top = ImGui.Checkbox(ctx, 'Waveform sits on top of the list', S.wave_top)
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Puts the waveform and the controls above the results\ninstead of below them.')
       end
       ImGui.Spacing(ctx); ImGui.Separator(ctx); ImGui.Spacing(ctx)
 
