@@ -30,7 +30,7 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Field search: name: path: desc: lib: cat: db:
 - Spec tokens read straight from the database: 48k+ 2ch 24b 0.5s- 10s+ 3s=
 - Filters dropdown for the same things with checkboxes, including a length range
-- Multiple databases with per-database checkboxes, duplicates shown onc
+- Multiple databases with per-database checkboxes, duplicates shown once
 - Shuffle button for randomizing order of the list
 
 ### Audition
@@ -46,21 +46,27 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Fit to a length in seconds
 - Five-node EQ: HPF, three bells, LPF, with drag and mouse-wheel Q
 - Compressor with draggable threshold, ratio, attack, release, makeup and a gain reduction meter
-- EQ and comp reset when you pick another sound, so nothing carries over by accident
+- EQ and comp reset when you pick another sound, or hold them on to audition several files through the same band
 
 ### Spot
 - Spot button, S, Enter or double-click, onto the selected track at the edit cursor
 - Does not create a track
 - Multi-select with Ctrl, Shift and Shift+arrows, placed one after another
 - Drag out to the arrange view with a ghost item showing the real waveform where it will land
+- Right-click or Escape while still holding the mouse cancels a drag
 - Copy into the project media folder, glue on spot, move cursor after spot
 
 ### Themes
 - Four themes in light and dark: Rose, Sage, Rainbow, Simple
-- Pixel or smooth icons, eight font sizes, dockable too!
+- Three icon sets: Pixel, Outline and Bulky, eight font sizes, dockable too!
 - Hover guides you can switch off once you know your way around
 
-## Key	Action
+### Layout
+- Reorder columns by dragging a header, hide the ones you don't need by right-clicking, remembered between sessions
+- Hide the waveform and the EQ & comp panels for a list-only layout, handy on a vertical monitor
+- Put the waveform above the list instead of below
+
+## Key Action
 - Up/Down: browse results
 - Shift + Up/Down: extend the selection
 - Space: play/stop
@@ -69,3 +75,21 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Shift + click: select a run of results
 - Double-click: spot that result
 - Ctrl + click or right click slider: reset the slider value
+- Escape or right click: cancel a drag in progress
+
+## Changelog
+### 1.01
+#### Waveform
+peaks are read at screen resolution, so you see the detail your window can actually hold
+
+#### Layout
+hide the waveform or the EQ and comp panels, move the waveform above the list, reorder and hide columns
+
+#### Drag and drop
+right-click or Escape cancels a drag, and the crash a tester hit is fixed
+
+#### EQ and Comp
+Can be held between files, so you can audition several through the same band
+
+#### Setup
+simple Dark by default, Simple and Rainbow spectral colours fixed, three icon sets
