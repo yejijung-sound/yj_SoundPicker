@@ -1,5 +1,4 @@
 -- @description yj_SoundPicker
--- @creator Yeji Jung
 -- @version 1.0
 -- @about
 --   Reads your existing Media Explorer databases (MediaDB/*.ReaperFileList).
@@ -7,20 +6,37 @@
 --   Tokens: 48k 48k+ 44k-   1ch 2ch+   24b 16b-   2s 0.5s- 10s+ 3s=
 --   Preview with waveform, range selection, pitch, fit-to-length, EQ and compressor,
 --   then spot or drag to the selected track at the edit cursor.
---   Requires ReaImGui and SWS (both via ReaPack).
+--   Requires ReaImGui (ReaPack) and the SWS extension (sws-extension.org).
 
 --- Dependencies
+-- ReaPack installs no dependencies of its own, so point the way to each one.
+local NEED_IMGUI = 'yj_SoundPicker needs ReaImGui 0.9 or newer.\n\n' ..
+  'It is on ReaPack: Extensions > ReaPack > Browse packages, then search for ReaImGui.'
+
 if not reaper.ImGui_GetBuiltinPath then
-  reaper.MB('yj_SoundPicker needs ReaImGui. Install it from Extensions > ReaPack > Browse packages.', 'yj_SoundPicker', 0)
+  if reaper.ReaPack_BrowsePackages then
+    if reaper.MB(NEED_IMGUI .. '\n\nOpen ReaPack now?', 'yj_SoundPicker', 4) == 6 then
+      reaper.ReaPack_BrowsePackages('ReaImGui')
+    end
+  else
+    reaper.MB(NEED_IMGUI, 'yj_SoundPicker', 0)
+  end
   return
 end
 if not reaper.CF_CreatePreview then
-  reaper.MB('yj_SoundPicker needs the SWS extension (CF_Preview functions).', 'yj_SoundPicker', 0)
+  reaper.MB('yj_SoundPicker needs the SWS extension.\n\n' ..
+    'SWS does not come from ReaPack: download the installer from sws-extension.org, ' ..
+    'run it, then restart REAPER.', 'yj_SoundPicker', 0)
   return
 end
 
 package.path = reaper.ImGui_GetBuiltinPath() .. '/?.lua'
-local ImGui = require 'imgui' '0.9'
+local got_imgui, ImGui = pcall(function() return require 'imgui' '0.9' end)
+if not got_imgui then
+  reaper.MB(NEED_IMGUI .. '\n\nAn older version is installed. Synchronize packages to update it, ' ..
+    'then restart REAPER.', 'yj_SoundPicker', 0)
+  return
+end
 
 --- Constants and settings
 local SCRIPT        = 'yj_SoundPicker'
