@@ -2,8 +2,37 @@
 <index version="1" name="yj Scripts">
   <category name="yj_SoundPicker">
     <reapack name="yj_SoundPicker.lua" type="script" desc="yj_SoundPicker">
-      <version name="1.0" author="Yeji Jung" time="2026-11-17T06:00:00Z">
+      <version name="1.01" author="Yeji Jung" time="2026-11-17T21:05:00Z">
         <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundPicker.lua</source>
+        <changelog><![CDATA[Waveform
+  Reads peaks at screen resolution, so a wide window shows the detail it can hold
+  The centre line runs through silence again
+  Fixed a bar merging across silence and trailing a hairline to the end of the lane
+
+List
+  Drag a header to reorder columns, right-click one to hide it
+  Hidden columns are remembered between sessions
+
+Layout
+  Hide the waveform and the EQ and comp panels for a list-only layout
+  Option to put the waveform above the list
+  Option to keep EQ and comp settings when moving between files
+
+Drag and drop
+  Right-click or Escape cancels a drag in progress
+  Hardened against crashes: ghost items are revalidated every frame, and a
+  selection is clamped to the real file length before anything is placed
+
+Look
+  Simple Dark is now the default
+  Simple's spectral colours show frequency instead of a near-flat grey
+  Rainbow Dark sits on neutral grey so the spectral colours carry
+  Three icon sets: Pixel, Outline and Bulky, now all the same size
+  Fixed no hover highlight in the column menu on Rose and Sage
+
+Setup
+  ReaImGui and SWS are each pointed at the right place when missing
+  A clear message when ReaImGui is older than 0.9, instead of a Lua error]]></changelog>
       </version>
       <metadata>
         <description><![CDATA[Reads your existing Media Explorer databases (MediaDB/*.ReaperFileList).
@@ -13,7 +42,7 @@ Tokens: 48k 48k+ 44k-   1ch 2ch+   24b 16b-   2s 0.5s- 10s+ 3s=
 
 Preview with waveform, range selection, pitch, fit-to-length, EQ and compressor, then spot or drag to the selected track at the edit cursor.
 
-Requires ReaImGui and SWS, both via ReaPack.]]></description>
+Requires ReaImGui (ReaPack) and the SWS extension (sws-extension.org).]]></description>
         <link rel="website" href="https://github.com/yejijung-sound/yj_SoundPicker">GitHub</link>
       </metadata>
     </reapack>
