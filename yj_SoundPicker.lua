@@ -1,4 +1,5 @@
 -- @description yj_SoundPicker
+-- @creator Yeji Jung
 -- @version 1.0
 -- @about
 --   Reads your existing Media Explorer databases (MediaDB/*.ReaperFileList).
