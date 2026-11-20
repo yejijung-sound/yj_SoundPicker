@@ -1,6 +1,6 @@
 -- @description yj_SoundPicker
 -- @author Yeji Jung
--- @version 1.01
+-- @version 1.02
 -- @about
 --   Reads your existing Media Explorer databases (MediaDB/*.ReaperFileList).
 --   Search: words (AND), OR / comma, NOT / -word, "exact phrase", field:word
@@ -444,6 +444,7 @@ local function get_info(key, low_only)
   if low_only then return inf end
   inf.cells = { inf.meta, inf.cat, fmt_len(inf.len), fmt_sr(inf.sr),
     (inf.ch and inf.ch > 0) and tostring(inf.ch) or '', (inf.bits and inf.bits > 0) and tostring(inf.bits) or '', inf.lib }
+  inf.row_id = inf.name .. '##r' .. key -- built once, not per frame
   if info_count >= 20000 then info_cache, info_count = {}, 0 end
   info_cache[key] = inf
   info_count = info_count + 1
@@ -806,10 +807,18 @@ end
 local filters_changed_at = nil
 local search_active = false
 
-local function words(str)
-  local out = {}
-  for w in str:gmatch('[^%s,]+') do out[#out + 1] = w:lower() end
-  return out
+-- The words of a filter box. count_only returns how many there are instead of the
+-- list: that runs every frame, and find walks the string without building an iterator.
+local function words(str, count_only)
+  local out = not count_only and {} or nil
+  local n, i = 0, 1
+  while true do
+    local a = str:find('[^%s,]', i)
+    if not a then return out or n end
+    local b = str:find('[%s,]', a + 1) or (#str + 1)
+    n, i = n + 1, b + 1
+    if out then out[n] = str:sub(a, b - 1):lower() end
+  end
 end
 
 local function filter_clauses()
@@ -838,13 +847,16 @@ local function filter_clauses()
   return cls
 end
 
+-- runs every frame, so it counts without building anything
 local function filter_count()
   local n = 0
-  for _, t in ipairs({ F.sr, F.bits, F.ch }) do for _ in pairs(t) do n = n + 1 end end
-  n = n + #words(F.any) + #words(F.none)
-  if not F.phrase:match('^%s*$') then n = n + 1 end
-  if len_secs(F.len_min) then n = n + 1 end
-  if len_secs(F.len_max) then n = n + 1 end
+  for _ in pairs(F.sr) do n = n + 1 end
+  for _ in pairs(F.bits) do n = n + 1 end
+  for _ in pairs(F.ch) do n = n + 1 end
+  n = n + words(F.any, true) + words(F.none, true)
+  if F.phrase:find('%S') then n = n + 1 end
+  if F.len_min ~= '' and len_secs(F.len_min) then n = n + 1 end
+  if F.len_max ~= '' and len_secs(F.len_max) then n = n + 1 end
   return n
 end
 
@@ -2106,7 +2118,7 @@ do
 end
 
 --- Icons
-local draw_icon, inline_icon, icon_button
+local draw_icon, inline_icon, icon_button, icon_button_w
 do
   local ICONS = {
     play = { '#......', '###....', '#####..', '#######', '#####..', '###....', '#......' },
@@ -2124,6 +2136,7 @@ do
     eq   = { '.#..#..#.', '.#..#..#.', '###.#..#.', '.#..#.###', '.#.###.#.', '.#..#..#.', '.#..#..#.' },
     comp = { '#........', '#.....###', '#....#...', '#...#....', '#..#.....', '#.#......', '##.......', '#########' },
     dice = { '.#######.', '#.......#', '#.#...#.#', '#.......#', '#...#...#', '#.......#', '#.#...#.#', '#.......#', '.#######.' },
+    reset = { '.##..##.', '#....###', '#......#', '#......#', '#......#', '#......#', '.#....#.', '..####..' },
   }
 
   local ICON = {}
@@ -2189,6 +2202,20 @@ do
     poly(dl, c, t, false, bx + z * 0.72, by + z * 0.16, bx + b, by + z * 0.32, bx + z * 0.72, by + z * 0.48)
     poly(dl, c, t, false, bx + b, by + z * 0.45, bx + b, by + z * 0.68, bx + a, by + z * 0.68)
     poly(dl, c, t, false, bx + z * 0.28, by + z * 0.52, bx + a, by + z * 0.68, bx + z * 0.28, by + z * 0.84)
+  end
+  VEC.reset = function(dl, x, y, w, h, c)
+    local bx, by, z = box(x, y, w, h)
+    local cx, cy, t = bx + z / 2, by + z * 0.52, sw(z)
+    -- a ring open at the top, drawn inset like the other line icons
+    local r, a = z * 0.355, -math.pi / 3
+    D.DrawList_PathClear(dl)
+    D.DrawList_PathArcTo(dl, cx, cy, r, a, math.pi * 4 / 3, 24)
+    D.DrawList_PathStroke(dl, c, 0, t)
+    local ex, ey = cx + math.cos(a) * r, cy + math.sin(a) * r
+    local dx, dy = math.sin(a), -math.cos(a) -- the way the arrow travels
+    local hl, hw = r * 0.65 * KD, r * 0.37 * KD
+    D.DrawList_AddTriangleFilled(dl, ex + dx * hl, ey + dy * hl,
+      ex - dy * hw, ey + dx * hw, ex + dy * hw, ey - dx * hw, c)
   end
   VEC.spot = function(dl, x, y, w, h, c)
     local bx, by, z = box(x, y, w, h)
@@ -2300,14 +2327,17 @@ do
     draw_icon(ImGui.GetWindowDrawList(ctx), name, x1, y1 + (fh - ic.h * px) / 2, px, col)
   end
 
+  icon_button_w = function(icon, label)
+    return 18 + ICON[icon].w * 2 + (label and (7 + ImGui.CalcTextSize(ctx, label)) or 0)
+  end
+
   icon_button = function(id, icon, label, on, tip, disabled)
     local px = 2
     local ic = ICON[icon]
     local iw, ih = ic.w * px, ic.h * px
-    local tw = label and ImGui.CalcTextSize(ctx, label) or 0
     local fh = ImGui.GetFrameHeight(ctx)
     local padx = 9
-    local bw = padx * 2 + iw + (label and (7 + tw) or 0)
+    local bw = icon_button_w(icon, label)
     local clicked = ImGui.InvisibleButton(ctx, id, bw, fh)
     local hovered, active = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
     local x1, y1 = ImGui.GetItemRectMin(ctx)
@@ -2721,6 +2751,11 @@ local fx_area = (function()
       apply_eq()
       if playing and fx_needed() ~= was then play(play_pos) end
     end
+    ImGui.SameLine(ctx, 0, 4)
+    if icon_button('##eq_rst', 'reset', nil, false, 'Reset the EQ: every node back to flat') then
+      for k, v in pairs(EQ_DEF) do S[k] = v end
+      apply_eq()
+    end
     local tbx = ImGui.GetItemRectMax(ctx)
     local th = ImGui.GetTextLineHeight(ctx)
     ImGui.DrawList_AddText(dl, x + 8, y + fh + 6, T.cols.TextDisabled, 'drag')
@@ -2897,6 +2932,12 @@ local fx_area = (function()
       apply_comp()
       if playing and fx_needed() ~= was then play(play_pos) end
     end
+    ImGui.SameLine(ctx, 0, 4)
+    if icon_button('##comp_rst', 'reset', nil, false,
+        'Reset the compressor: threshold, ratio, attack, release and makeup') then
+      for k, v in pairs(CO_DEF) do S[k] = v end
+      apply_comp()
+    end
     local active_meters = S.comp_on and playing
     local gr = active_meters and meter_gr or 0
     local tbx = ImGui.GetItemRectMax(ctx)
@@ -2987,13 +3028,18 @@ local fx_area = (function()
   local function fx_area_impl()
     local w = ImGui.GetContentRegionAvail(ctx)
     local x, y = ImGui.GetCursorScreenPos(ctx)
-    if w < UI.sz(560) then
+    local h = UI.fx_h
+    -- the side column takes whichever is widest: the title row, the GR readout or the minimum
+    local side = math.max(UI.sz(70), ImGui.CalcTextSize(ctx, 'GR 24.0') + 16,
+      6 + icon_button_w('comp', 'Comp') + 4 + icon_button_w('reset'))
+    local need = side + 8 + (h - 12) + 12
+      + 4 * math.max(UI.sz(58), ImGui.CalcTextSize(ctx, 'Release') + 10, ImGui.CalcTextSize(ctx, '200.0 ms') + 8) + 30
+    -- the EQ panel still has to hold its own title row
+    local eq_min = 18 + icon_button_w('eq', 'EQ') + icon_button_w('reset')
+    if w < need + eq_min + 10 then
       ImGui.TextDisabled(ctx, 'widen the window to show EQ and comp')
       return
     end
-    local h = UI.fx_h
-    local need = math.max(UI.sz(70), ImGui.CalcTextSize(ctx, 'GR 24.0') + 16) + 8 + (h - 12) + 12
-      + 4 * math.max(UI.sz(58), ImGui.CalcTextSize(ctx, 'Release') + 10, ImGui.CalcTextSize(ctx, '200.0 ms') + 8) + 30
     local cw = math.min(math.max(UI.sz(440), need, w * 0.4), math.max(UI.sz(500), need))
     local ew = w - cw - 10
     eq_panel(x, y, ew, h)
@@ -3047,11 +3093,7 @@ local function loop()
       if not ok or coroutine.status(counter) == 'dead' then counting = false end
     end
     local now = reaper.time_precise()
-    if query ~= typed_query then
-      typed_query = query; edit_time = now
-      -- typing a new search clears the word filters, not the checkboxes
-      if F.any ~= '' or F.none ~= '' or F.phrase ~= '' then F.any, F.none, F.phrase = '', '', '' end
-    end
+    if query ~= typed_query then typed_query = query; edit_time = now end
     if filters_changed_at and now - filters_changed_at >= 0.15 then
       filters_changed_at = nil
       need_search = true
@@ -3102,10 +3144,12 @@ local function loop()
                    | ImGui.TableFlags_Hideable | ImGui.TableFlags_Reorderable
       if ImGui.BeginTable(ctx, 'results', 8, tflags, 0, table_h) then
         ImGui.TableSetupScrollFreeze(ctx, 0, 1)
-        local off = {}
-        for nm in (S.cols_off or ''):gmatch('[^|]+') do off[nm] = true end
+        if UI.hid_of ~= S.cols_off then -- reparsed only when the hidden list changes
+          UI.hid_of, UI.hid = S.cols_off, {}
+          for nm in (S.cols_off or ''):gmatch('[^|]+') do UI.hid[nm] = true end
+        end
         local function col(name, flags, w)
-          if off[name] then flags = flags | ImGui.TableColumnFlags_DefaultHide end
+          if UI.hid[name] then flags = flags | ImGui.TableColumnFlags_DefaultHide end
           ImGui.TableSetupColumn(ctx, name, flags, w)
         end
         col('Name', ImGui.TableColumnFlags_WidthStretch | ImGui.TableColumnFlags_NoHide, 3)
@@ -3162,7 +3206,7 @@ local function loop()
               ImGui.PushStyleColor(ctx, ImGui.Col_HeaderHovered, T.cols.Header)
               ImGui.PushStyleColor(ctx, ImGui.Col_HeaderActive, T.cols.Header)
             end
-            local clicked = ImGui.Selectable(ctx, f.name .. '##r' .. i, is_sel, sflags)
+            local clicked = ImGui.Selectable(ctx, f.row_id, is_sel, sflags)
             if is_sel then ImGui.PopStyleColor(ctx, 2) end
             if clicked then
               local mods = ImGui.GetKeyMods(ctx)
@@ -3329,6 +3373,11 @@ local function loop()
         ImGui.TextDisabled(ctx, ('= %.3fx'):format(eff_rate()))
       end
       if changed then apply_preview_params() end
+      ImGui.SameLine(ctx, 0, 16)
+      _, S.fx_keep = ImGui.Checkbox(ctx, 'Keep FX', S.fx_keep)
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Keep the EQ and comp settings when you pick another sound,\nso you can audition several files through the same band.\nOff: both panels reset for every sound.')
+      end
 
       if two_col then
         ImGui.TableNextColumn(ctx)
@@ -3430,10 +3479,6 @@ local function loop()
       _, S.show_fx = ImGui.Checkbox(ctx, 'EQ and compressor', S.show_fx)
       if ImGui.IsItemHovered(ctx) then
         ImGui.SetTooltip(ctx, 'Hide the EQ and comp panels. Whatever is switched on stays on.')
-      end
-      _, S.fx_keep = ImGui.Checkbox(ctx, 'Keep EQ and Comp settings in between files', S.fx_keep)
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, 'Off: both reset each time you pick another sound.\nOn: your settings stay put, so you can audition several\nfiles through the same band.')
       end
       _, S.wave_top = ImGui.Checkbox(ctx, 'Waveform sits on top of the list', S.wave_top)
       if ImGui.IsItemHovered(ctx) then
