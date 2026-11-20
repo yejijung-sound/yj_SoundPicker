@@ -46,7 +46,8 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Fit to a length in seconds
 - Five-node EQ: HPF, three bells, LPF, with drag and mouse-wheel Q
 - Compressor with draggable threshold, ratio, attack, release, makeup and a gain reduction meter
-- EQ and comp reset when you pick another sound, or hold them on to audition several files through the same band
+- Reset button on each panel, so you can start the EQ or the comp over without touching every node
+- EQ and comp reset when you pick another sound, or tick Keep FX to audition several files through the same band
 
 ### Spot
 - Spot button, S, Enter or double-click, onto the selected track at the edit cursor
@@ -66,7 +67,7 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Hide the waveform and the EQ & comp panels for a list-only layout, handy on a vertical monitor
 - Put the waveform above the list instead of below
 
-## Key Action
+## Key	Action
 - Up/Down: browse results
 - Shift + Up/Down: extend the selection
 - Space: play/stop
@@ -76,20 +77,3 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Double-click: spot that result
 - Ctrl + click or right click slider: reset the slider value
 - Escape or right click: cancel a drag in progress
-
-## Changelog
-### 1.01
-#### Waveform
-peaks are read at screen resolution, so you see the detail your window can actually hold
-
-#### Layout
-hide the waveform or the EQ and comp panels, move the waveform above the list, reorder and hide columns
-
-#### Drag and drop
-right-click or Escape cancels a drag, and the crash a tester hit is fixed
-
-#### EQ and Comp
-Can be held between files, so you can audition several through the same band
-
-#### Setup
-simple Dark by default, Simple and Rainbow spectral colours fixed, three icon sets

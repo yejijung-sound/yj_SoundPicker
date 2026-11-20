@@ -2,6 +2,21 @@
 <index version="1" name="yj Scripts">
   <category name="yj_SoundPicker">
     <reapack name="yj_SoundPicker.lua" type="script" desc="yj_SoundPicker">
+      <version name="1.02" author="Yeji Jung" time="2026-11-20T19:30:00Z">
+        <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundPicker.lua</source>
+        <changelog><![CDATA[Filters
+  Fixed the OR, NOT and exact phrase boxes being quietly emptied when you
+  edited the search box, which made a filter look like it was doing nothing
+
+Effects
+  A reset button on the EQ panel and on the comp panel, so you can start a
+  band over without dragging every node back
+  Keep FX sits on the controls row instead of inside the settings window
+
+Layout
+  The EQ and comp panels work out the width they need, so they wait for a
+  slightly wider window instead of letting a knob run off the edge]]></changelog>
+      </version>
       <version name="1.01" author="Yeji Jung" time="2026-11-17T21:05:00Z">
         <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundPicker.lua</source>
         <changelog><![CDATA[Waveform
