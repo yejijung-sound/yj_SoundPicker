@@ -1,16 +1,14 @@
 -- @description yj_SoundPicker
 -- @author Yeji Jung
--- @version 1.02
+-- @version 1.10
 -- @about
 --   Reads your existing Media Explorer databases (MediaDB/*.ReaperFileList).
---   Search: words (AND), OR / comma, NOT / -word, "exact phrase", field:word
---   Tokens: 48k 48k+ 44k-   1ch 2ch+   24b 16b-   2s 0.5s- 10s+ 3s=
---   Preview with waveform, range selection, pitch, fit-to-length, EQ and compressor,
---   then spot or drag to the selected track at the edit cursor.
+--   Definitely not inspired by S*********.
+--   Search: words (AND), OR / comma, NOT / -word, "exact phrase", field:word, tokens: 48k 48k+ 44k-   1ch 2ch+   24b 16b-   2s 0.5s- 10s+ 3s=
+--   Preview with waveform, range selection, pitch, fit-to-length, EQ and compressor, then spot or drag to the selected track at the edit cursor.
 --   Requires ReaImGui (ReaPack) and the SWS extension (sws-extension.org).
 
 --- Dependencies
--- ReaPack installs no dependencies of its own, so point the way to each one.
 local NEED_IMGUI = 'yj_SoundPicker needs ReaImGui 0.9 or newer.\n\n' ..
   'It is on ReaPack: Extensions > ReaPack > Browse packages, then search for ReaImGui.'
 
@@ -111,6 +109,71 @@ for k in pairs(S) do if k:match('^e_') or k:match('^c_') then NO_SAVE[k] = true 
 -- UI state lives in one table: the main chunk is close to Lua's 200-local limit
 local UI = { k = 1 }
 function UI.sz(n) return math.floor(n * UI.k + 0.5) end
+
+-- The sampler writes a heartbeat while it runs; a few checks a second is enough.
+function UI.sampler_live()
+  local now = reaper.time_precise()
+  if not UI.beat_at or now - UI.beat_at > 0.25 then
+    UI.beat_at = now
+    local beat = tonumber(reaper.GetExtState('yj_SoundSampler', 'alive'))
+    UI.beat = (beat ~= nil) and (now - beat < 2)
+  end
+  return UI.beat
+end
+
+-- The script of ours named <stem> sitting next to this one. A renamed copy finds
+-- its own twin, so "yj_SoundPicker Test.lua" finds "yj_SoundSampler Test.lua".
+-- Returns the path, or nil and the name it was looking for.
+function UI.twin(stem)
+  if not UI.dir then
+    local me = select(2, reaper.get_action_context())
+    UI.dir, UI.file = me:match('^(.*[\\/])([^\\/]+)$')
+  end
+  local name = UI.file and UI.file:gsub('SoundPicker', stem) or ('yj_' .. stem .. '.lua')
+  for _, p in ipairs({ UI.dir and (UI.dir .. name), UI.dir and (UI.dir .. 'yj_' .. stem .. '.lua'),
+      reaper.GetResourcePath() .. '/Scripts/yj Scripts/yj_SoundPicker/yj_' .. stem .. '.lua' }) do
+    local f = p and io.open(p, 'r')
+    if f then f:close(); return p, name end
+  end
+  return nil, name
+end
+
+-- Runs yj_UpdateChecker, which asks the repository what the newest published
+-- yj_SoundPicker and yj_SoundSampler are and reports either way.
+function UI.check_updates()
+  local beat = tonumber(reaper.GetExtState('yj_UpdateChecker', 'busy'))
+  if beat and reaper.time_precise() - beat < 2 then return end -- one is already out
+  local path, name = UI.twin('UpdateChecker')
+  if not path then
+    reaper.MB(name .. ' has to sit in the same folder as this script:\n\n' ..
+      (UI.dir or '?') .. '\n\nPut it there, or install it from ReaPack.',
+      'Update checker not found', 0)
+    return
+  end
+  local cmd = reaper.AddRemoveReaScript(true, 0, path, true)
+  if cmd and cmd ~= 0 then reaper.Main_OnCommand(cmd, 0) end
+end
+
+-- Runs the sampler sitting next to this script, registering it the first time.
+-- Clicking while it is open closes it instead.
+function UI.open_sampler()
+  if UI.sampler_live() then
+    reaper.SetExtState('yj_SoundSampler', 'close', tostring(reaper.time_precise()), false)
+    UI.beat, UI.beat_at = false, nil -- the button lets go straight away
+    return
+  end
+  local path, twin = UI.twin('SoundSampler')
+  if not path then
+    reaper.MB(twin .. ' has to sit in the same folder as this script:\n\n' ..
+      (UI.dir or '?') .. '\n\nPut it there, or install it from ReaPack.\n\n' ..
+      'It does not have to be running: open it when you want to set up slots,\n' ..
+      'then close it and your keyboard keeps playing the track it built.',
+      'Sampler not found', 0)
+    return
+  end
+  local cmd = reaper.AddRemoveReaScript(true, 0, path, true)
+  if cmd and cmd ~= 0 then reaper.Main_OnCommand(cmd, 0) end
+end
 
 -- the ? button switches every tooltip off
 do
@@ -1498,16 +1561,25 @@ local function load_waveform(f)
     return
   end
   local w = read_peaks(src, len, nch)
-  if w then
+  -- A file can have peaks but no spectral block: REAPER only writes that when
+  -- it has had reason to. Ask it to build them once, rather than showing the
+  -- colour as missing for a file that could have it.
+  local retry = w and w.nospec and not (UI.spec_tried and UI.spec_tried[f.path])
+  if w and not retry then
     reaper.PCM_Source_Destroy(src)
     wf = w
     return
   end
+  if retry then
+    UI.spec_tried = UI.spec_tried or {}
+    UI.spec_tried[f.path] = true
+  end
   if reaper.PCM_Source_BuildPeaks(src, 0) ~= 0 then
-    wf = { ch = {}, n = 0, len = len, building = true }
-    wf_job = { src = src, f = f, len = len, nch = nch }
+    wf = w or { ch = {}, n = 0, len = len }
+    wf.building = true
+    wf_job = { src = src, f = f, len = len, nch = nch, had = w }
   else
-    wf = read_peaks(src, len, nch) or { ch = {}, n = 0, len = len }
+    wf = read_peaks(src, len, nch) or w or { ch = {}, n = 0, len = len }
     reaper.PCM_Source_Destroy(src)
   end
 end
@@ -1520,7 +1592,9 @@ local function process_wf_job()
       reaper.PCM_Source_BuildPeaks(wf_job.src, 2)
       local w = read_peaks(wf_job.src, wf_job.len, wf_job.nch)
       reaper.PCM_Source_Destroy(wf_job.src)
-      if wf_job.f == cur then wf = w or { ch = {}, n = 0, len = wf_job.len } end
+      -- keep what we had if the rebuild came back with no more than before
+      if w and w.nospec and wf_job.had and not wf_job.had.nospec then w = wf_job.had end
+      if wf_job.f == cur then wf = w or wf_job.had or { ch = {}, n = 0, len = wf_job.len } end
       wf_job = nil
       return
     end
@@ -2137,6 +2211,7 @@ do
     comp = { '#........', '#.....###', '#....#...', '#...#....', '#..#.....', '#.#......', '##.......', '#########' },
     dice = { '.#######.', '#.......#', '#.#...#.#', '#.......#', '#...#...#', '#.......#', '#.#...#.#', '#.......#', '.#######.' },
     reset = { '.##..##.', '#....###', '#......#', '#......#', '#......#', '#......#', '.#....#.', '..####..' },
+    keys = { '#########', '#.#.#.#.#', '#.#.#.#.#', '#.#.#.#.#', '#.......#', '#.......#', '#########' },
   }
 
   local ICON = {}
@@ -2287,6 +2362,16 @@ do
       local xx = bx + z * (0.2 + (i - 1) * 0.3)
       poly(dl, c, t, false, xx, by + z * 0.08, xx, by + z * 0.92)
       D.DrawList_AddRectFilled(dl, xx - z * 0.11 * KD, by + z * k - z * 0.07 * KD, xx + z * 0.11 * KD, by + z * k + z * 0.07 * KD, c, 1)
+    end
+  end
+  VEC.keys = function(dl, x, y, w, h, c)
+    local bx, by, z = box(x, y, w, h)
+    local t = sw(z)
+    local kt, kb = by + z * 0.2, by + z * 0.8
+    poly(dl, c, t, true, bx + z * 0.04, kt, bx + z * 0.96, kt, bx + z * 0.96, kb, bx + z * 0.04, kb)
+    for i = 1, 3 do -- three black keys hanging from the top
+      local xx = bx + z * (0.26 + (i - 1) * 0.24)
+      D.DrawList_AddRectFilled(dl, xx - z * 0.05 * KD, kt, xx + z * 0.05 * KD, kt + (kb - kt) * 0.58, c)
     end
   end
   VEC.comp = function(dl, x, y, w, h, c)
@@ -2463,7 +2548,8 @@ local function draw_waveform(w, h)
     local r = wf.runs
     for q = 1, #r, 5 do ImGui.DrawList_AddRectFilled(dl, r[q], r[q + 1], r[q + 2], r[q + 3], r[q + 4]) end
     if wf.nospec then
-      local msg = 'no spectral data in this peak file'
+      local msg = wf.building and 'building spectral peaks...'
+        or 'no spectral data in this peak file'
       local mw = ImGui.CalcTextSize(ctx, msg)
       ImGui.DrawList_AddText(dl, x2 - mw - 10, y2 - 20, T.wave_msg, msg)
     end
@@ -2584,8 +2670,10 @@ local function top_bar(dock_id)
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, HELP) end
   ImGui.SameLine(ctx, 0, 6)
   if first_frame then ImGui.SetKeyboardFocusHere(ctx); first_frame = false end
-  -- leave room for the buttons on the right
-  ImGui.SetNextItemWidth(ctx, -(36 + 8 + UI.sz(160) + 8 + UI.sz(170) + 8 + 36 + 8 + 36 + 8 + 36 + 6))
+  -- room for everything right of the search box, measured from the buttons
+  ImGui.SetNextItemWidth(ctx, -(UI.sz(160) + UI.sz(170) + 54
+    + icon_button_w('dice') + icon_button_w('keys') + icon_button_w('help')
+    + icon_button_w('gear') + icon_button_w('dock')))
   local _
   _, query = ImGui.InputTextWithHint(ctx, '##q', 'search...  (OR  NOT  "phrase"  name:  desc:  48k+  1ch  2s-)', query)
   ImGui.SameLine(ctx)
@@ -2622,6 +2710,12 @@ local function top_bar(dock_id)
       need_search = true
     end
     ImGui.EndCombo(ctx)
+  end
+  ImGui.SameLine(ctx)
+  local sampling = UI.sampler_live()
+  if icon_button('##sampler', 'keys', nil, sampling, sampling and 'Close yj_SoundSampler'
+      or 'Open yj_SoundSampler: play the sounds you pick from a MIDI keyboard') then
+    UI.open_sampler()
   end
   ImGui.SameLine(ctx)
   if icon_button('##tips', 'help', nil, S.tips, 'Hover guides: on (click to turn them off)') then
@@ -3029,7 +3123,7 @@ local fx_area = (function()
     local w = ImGui.GetContentRegionAvail(ctx)
     local x, y = ImGui.GetCursorScreenPos(ctx)
     local h = UI.fx_h
-    -- the side column takes whichever is widest: the title row, the GR readout or the minimum
+    -- the side column takes the widest of the title row, the readout, the minimum
     local side = math.max(UI.sz(70), ImGui.CalcTextSize(ctx, 'GR 24.0') + 16,
       6 + icon_button_w('comp', 'Comp') + 4 + icon_button_w('reset'))
     local need = side + 8 + (h - 12) + 12
@@ -3094,6 +3188,25 @@ local function loop()
     end
     local now = reaper.time_precise()
     if query ~= typed_query then typed_query = query; edit_time = now end
+    -- yj_SoundSampler reads the current pick from here
+    if cur ~= UI.pick_f or sel_a ~= UI.pick_a or sel_b ~= UI.pick_b then
+      UI.pick_f, UI.pick_a, UI.pick_b = cur, sel_a, sel_b
+      if cur then
+        UI.pick_n = (UI.pick_n or 0) + 1
+        reaper.SetExtState(SCRIPT, 'pick',
+          cur.path .. '\31' .. (sel_a or 0) .. '\31' .. (sel_b or cur.len or 0), false)
+        reaper.SetExtState(SCRIPT, 'pick_n', tostring(UI.pick_n), false)
+      end
+    end
+    -- the sampler matches this window, so the look is published as it changes
+    if S.theme ~= UI.pub_th or S.mode ~= UI.pub_md or S.font_size ~= UI.pub_fs
+      or S.tips ~= UI.pub_tp then
+      UI.pub_th, UI.pub_md, UI.pub_fs, UI.pub_tp = S.theme, S.mode, S.font_size, S.tips
+      reaper.SetExtState(SCRIPT, 'theme', S.theme, true)
+      reaper.SetExtState(SCRIPT, 'mode', S.mode, true)
+      reaper.SetExtState(SCRIPT, 'font_size', tostring(S.font_size), true)
+      reaper.SetExtState(SCRIPT, 'tips', S.tips and '1' or '0', true)
+    end
     if filters_changed_at and now - filters_changed_at >= 0.15 then
       filters_changed_at = nil
       need_search = true
@@ -3333,6 +3446,11 @@ local function loop()
       cm, S.mon_db = slider('##mon', S.mon_db, -48, 12, 'mon %.0f dB', 0, 130,
         'Monitor level: changes what you hear while auditioning only,\nnever the volume of spotted items. Ctrl+click to reset.')
       if cm then apply_preview_params() end
+      ImGui.SameLine(ctx, 0, 16)
+      _, S.fx_keep = ImGui.Checkbox(ctx, 'Keep FX between files', S.fx_keep)
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Keep the EQ and comp settings when you pick another sound,\nso you can audition several files through the same band.\nOff: both panels reset for every sound.')
+      end
 
       -- volume, pitch, fit
       local changed, c = false, nil
@@ -3373,12 +3491,6 @@ local function loop()
         ImGui.TextDisabled(ctx, ('= %.3fx'):format(eff_rate()))
       end
       if changed then apply_preview_params() end
-      ImGui.SameLine(ctx, 0, 16)
-      _, S.fx_keep = ImGui.Checkbox(ctx, 'Keep FX', S.fx_keep)
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, 'Keep the EQ and comp settings when you pick another sound,\nso you can audition several files through the same band.\nOff: both panels reset for every sound.')
-      end
-
       if two_col then
         ImGui.TableNextColumn(ctx)
         fx_area()
@@ -3489,14 +3601,28 @@ local function loop()
       ImGui.TextDisabled(ctx, 'Waveform')
       local cs
       cs, S.spectral = ImGui.Checkbox(ctx, 'Spectral colours', S.spectral)
-      if cs and cur then wf_request = cur end
+      -- turning it back on is worth another look: Spectral peaks may have been
+      -- switched on in REAPER since the last try
+      if cs then UI.spec_tried = nil; if cur then wf_request = cur end end
       if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, 'Colours the waveform by frequency, in the colours of the current theme.\nUses the spectral data REAPER stores in its peak files. If a file shows\n"no spectral data", turn on Spectral peaks in View > Peaks display settings\nand rebuild its peaks.')
+        ImGui.SetTooltip(ctx, 'Colours the waveform by frequency, in the colours of the current theme.\nUses the spectral data REAPER keeps in its peak files, and asks REAPER to\nbuild it the first time a file turns out not to have any. REAPER only writes\nit while Spectral peaks is on in View > Peaks display settings.')
       end
       ImGui.Spacing(ctx); ImGui.Separator(ctx); ImGui.Spacing(ctx)
 
       ImGui.TextDisabled(ctx, 'Help')
       _, S.tips = ImGui.Checkbox(ctx, 'Show hover guides', S.tips)
+      ImGui.Spacing(ctx); ImGui.Separator(ctx); ImGui.Spacing(ctx)
+
+      ImGui.TextDisabled(ctx, 'Updates')
+      -- the checker beats while curl is out, so the click has something to show
+      local beat = tonumber(reaper.GetExtState('yj_UpdateChecker', 'busy'))
+      local busy = beat ~= nil and (reaper.time_precise() - beat) < 2
+      if busy then ImGui.BeginDisabled(ctx) end
+      if ImGui.Button(ctx, busy and 'Checking...' or 'Check for Updates') then UI.check_updates() end
+      if busy then ImGui.EndDisabled(ctx) end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, 'Asks the repository whether a newer yj_SoundPicker or\nyj_SoundSampler has been published, and tells you either way.\nNeeds yj_UpdateChecker installed alongside this script.')
+      end
       ImGui.End(ctx)
     end
     if not sopen then S.settings_win = false end

@@ -1,7 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
 <index version="1" name="yj Scripts">
   <category name="yj_SoundPicker">
+    <reapack name="yj_UpdateChecker.lua" type="script" desc="yj_UpdateChecker">
+      <version name="1.0" author="Yeji Jung" time="2026-11-24T01:15:00Z">
+        <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_UpdateChecker.lua</source>
+        <changelog><![CDATA[First release.
+Asks the repository whether a newer yj_SoundPicker or yj_SoundSampler has been
+published, and tells you either way. Press Check for Updates in yj_SoundPicker's
+settings, or run it from the action list. It runs nothing on its own.]]></changelog>
+      </version>
+      <metadata>
+        <description><![CDATA[Tells you whether a newer yj_SoundPicker or yj_SoundSampler is out.
+
+Press Check for Updates in yj_SoundPicker's settings, or run this from the action list. It reports either way, and offers to open ReaPack's synchronize when something is behind.
+
+It runs nothing on its own and nothing in the background, and it never holds REAPER up while it waits on the network.]]></description>
+        <link rel="website" href="https://github.com/yejijung-sound/yj_SoundPicker">GitHub</link>
+      </metadata>
+    </reapack>
+    <reapack name="yj_SoundSampler.lua" type="script" desc="yj_SoundSampler">
+      <version name="1.0" author="Yeji Jung" time="2026-11-24T01:15:00Z">
+        <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundSampler.lua</source>
+        <changelog><![CDATA[First release.
+
+Slots
+  Eight slots, each a ReaSamplomatic5000 on one armed track
+  Whatever you pick in yj_SoundPicker drops into the slot you are working on,
+  including the range you selected on the waveform
+  Key range, root note, in and out points, gain, pan and loop per slot
+  Slots survive closing and reopening: the plugins are found again by ID
+
+Shaping
+  Envelope with a graph you drag by its corners, and an axis that follows
+  whatever length the envelope actually is
+  Three LFOs per slot, one each for volume, pan and pitch, with their own
+  shape, speed and depth
+
+Playing
+  An on-screen piano you can click, and a MIDI keyboard plays the same slots
+  Ctrl+click resets any control, or clears a slot
+
+Fitting in
+  Follows yj_SoundPicker's theme, font size and hover guides]]></changelog>
+      </version>
+      <metadata>
+        <description><![CDATA[Plays sounds picked in yj_SoundPicker from a MIDI keyboard.
+
+Eight slots, each one a ReaSamplomatic5000 on a single armed track, with its own key range, root note, in and out points, gain, pan, attack, decay, sustain, release and loop. Tile the slots across the keyboard to split a library of takes, then play and record them in REAPER.
+
+Requires ReaImGui. Works on its own, and follows whatever you pick in yj_SoundPicker.]]></description>
+        <link rel="website" href="https://github.com/yejijung-sound/yj_SoundPicker">GitHub</link>
+      </metadata>
+    </reapack>
     <reapack name="yj_SoundPicker.lua" type="script" desc="yj_SoundPicker">
+      <version name="1.10" author="Yeji Jung" time="2026-11-24T01:15:00Z">
+        <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundPicker.lua</source>
+        <changelog><![CDATA[Sampler
+  A keyboard button in the top bar opens yj_SoundSampler, which plays the sounds
+  you pick here from a MIDI keyboard. Whatever you select, and the range you
+  select on the waveform, goes straight into the slot you are working on
+
+Waveform
+  Spectral colours: a file whose peak file holds no spectral data now has it
+  built, instead of reporting the colour as unavailable. REAPER writes it while
+  Spectral peaks is on in View > Peaks display settings
+
+Effects
+  Keep FX reads Keep FX between files, and sits beside the monitor level
+
+Updates
+  A Check for Updates button in the settings window, which asks the repository
+  whether a newer yj_SoundPicker or yj_SoundSampler is out and tells you either
+  way. Needs yj_UpdateChecker installed alongside]]></changelog>
+      </version>
       <version name="1.02" author="Yeji Jung" time="2026-11-20T19:30:00Z">
         <source main="main">https://github.com/yejijung-sound/yj_SoundPicker/raw/main/yj_SoundPicker.lua</source>
         <changelog><![CDATA[Filters

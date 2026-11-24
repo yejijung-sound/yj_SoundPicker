@@ -5,6 +5,8 @@ Think of it as an enhanced version of Reaper's own Media Explorer!
 yj_SoundPicker offers OR, NOT, phrases and field syntax search, spectral waveform with range selection, multichannel lanes, pitch, stretch, reverse and EQ & compression FXs.
 Drag or press "S" key to spot to your session, with everything you set baked onto the item.
 
+The repository holds three scripts: **yj_SoundPicker** the browser, **yj_SoundSampler** to play what you pick from a MIDI keyboard, and **yj_UpdateChecker** to tell you when a newer version is out.
+
 ## Installation
 ‼️[ReaImGui](https://reapack.com/) and [SWS](https://sws-extension.org/) must be installed to use yj_SoundPicker‼️
 1. Make sure you have at least one Media Explorer database
@@ -17,6 +19,8 @@ Drag or press "S" key to spot to your session, with everything you set baked ont
    <img width="432" height="160" alt="image" src="https://github.com/user-attachments/assets/ae2372fd-781d-4fd7-a3e2-52fab71b9304" />
 
 4. Extensions > ReaPack > Browse packages, find yj_SoundPicker, install
+
+   yj_SoundSampler and yj_UpdateChecker live in the same repository, so install those from the same list whenever you want them
 
    <img width="440" height="316" alt="image" src="https://github.com/user-attachments/assets/e1a892f2-cf85-4ed9-bdb8-b9a8ba1219d6" />
 
@@ -36,7 +40,7 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 ### Audition
 - Waveform with click to play, drag to select a range
 - One lane per channel, up to eight
-- Spectral colouring from REAPER’s own peak data, following the theme
+- Spectral colouring following the theme, from REAPER’s own peak data, and built for you when a file hasn’t got any yet
 - Loop, reverse, auto-play, monitor level that never touches what you spot
 - Previews go straight to a chosen output pair
 - Preview stops the moment the project transport starts
@@ -47,7 +51,7 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Five-node EQ: HPF, three bells, LPF, with drag and mouse-wheel Q
 - Compressor with draggable threshold, ratio, attack, release, makeup and a gain reduction meter
 - Reset button on each panel, so you can start the EQ or the comp over without touching every node
-- EQ and comp reset when you pick another sound, or tick Keep FX to audition several files through the same band
+- EQ and comp reset when you pick another sound, or tick Keep FX between files to audition several files through the same band
 
 ### Spot
 - Spot button, S, Enter or double-click, onto the selected track at the edit cursor
@@ -66,6 +70,28 @@ I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup A
 - Reorder columns by dragging a header, hide the ones you don't need by right-clicking, remembered between sessions
 - Hide the waveform and the EQ & comp panels for a list-only layout, handy on a vertical monitor
 - Put the waveform above the list instead of below
+
+## yj_SoundSampler
+Press the keyboard button in the top bar to open it, or run it from the action list 🎹
+
+Plays the sounds you pick from a MIDI keyboard, so you can audition a whole library of takes under your fingers instead of clicking through them.
+- Eight slots, each one with its own key range and root note, tiled across the keyboard
+- Pick a sound in SoundPicker and it drops straight into the selected slot
+- Your waveform selection becomes the slot's in and out points
+- Gain, pan, loop, solo and mute per slot
+- Envelope with a graph you drag by its corners, on an axis that follows however long the envelope actually is
+- Three LFOs per slot, one each for volume, pan and pitch, with their own shape, speed and depth
+- An on-screen piano you can click, and your MIDI keyboard plays the same slots
+- Ctrl + click resets any control, or clears a slot
+- Close it and reopen it: your slots are still there
+- Follows SoundPicker's theme, font size and hover guides
+- Drag files onto the window to fill slots directly
+- Each slot is a ReaSamplomatic5000 on one armed track, so REAPER plays and records it
+
+## yj_UpdateChecker
+Tells you whether a newer yj_SoundPicker or yj_SoundSampler has been published.
+
+Open SoundPicker's settings and press **Check for Updates**, or run it from the action list. It runs either way, and offers to open ReaPack's synchronize when something is behind.
 
 ## Key	Action
 - Up/Down: browse results
