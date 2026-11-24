@@ -23,6 +23,7 @@ The repository holds three scripts: **yj_SoundPicker** the browser, **yj_SoundSa
    yj_SoundSampler and yj_UpdateChecker live in the same repository, so install those from the same list whenever you want them
 
    <img width="440" height="316" alt="image" src="https://github.com/user-attachments/assets/e1a892f2-cf85-4ed9-bdb8-b9a8ba1219d6" />
+   <img width="947" height="72" alt="image" src="https://github.com/user-attachments/assets/1aa1d31c-5787-4e51-a85f-21337fa5359b" />
 
 I recommend setting it up as a start-up action (Extensions > SWS/S&M > Startup Actions > Set global startup action), so you don't have to manually open it every time you open REAPER!
 
